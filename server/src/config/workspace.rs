@@ -1,11 +1,20 @@
 use crate::error::FileSysError;
 use fs_set_times::SystemTimeSpec;
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "String")]
 pub struct Workspace(PathBuf);
+
+impl Deref for Workspace {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl TryFrom<String> for Workspace {
     type Error = FileSysError;

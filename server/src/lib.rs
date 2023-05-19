@@ -14,6 +14,7 @@ use poem::Server;
 
 use std::env;
 use std::io;
+use std::sync::Arc;
 
 pub async fn run(mut config: Config) -> io::Result<()> {
     if let Some(level) = config.poem_level.take() {
@@ -21,8 +22,8 @@ pub async fn run(mut config: Config) -> io::Result<()> {
     }
     tracing_subscriber::fmt().init();
 
-    let app = router::new().with(Tracing);
     let server = Server::new(TcpListener::bind(("127.0.0.1", config.port))).name("sachima");
+    let app = router::new().with(Tracing).data(Arc::new(config));
 
     server.run(app).await
 }

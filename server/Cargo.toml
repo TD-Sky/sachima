@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bytes = { version = "1.4.0", features = ["serde"] }
 bytesize = { version = "1.2.0", features = ["serde"] }
 clap = { version = "4.2.7", features = ["derive"] }
 fs-set-times = "0.19.1"

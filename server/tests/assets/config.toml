@@ -1,0 +1,4 @@
+port = 8000
+poem_level = "info"
+workspace = "~/.local/state/sachima"
+max_upload = "2G"
