@@ -33,15 +33,13 @@ impl TryFrom<String> for LogLevel {
     type Error = InvalidLevel;
 
     fn try_from(s: String) -> Result<Self, InvalidLevel> {
-        let level = match s.as_str() {
+        Ok(match s.as_str() {
             "trace" => Self::Trace,
             "debug" => Self::Debug,
             "info" => Self::Info,
             "warn" => Self::Warn,
             "error" => Self::Error,
             _ => return Err(InvalidLevel(s)),
-        };
-
-        Ok(level)
+        })
     }
 }
