@@ -6,6 +6,7 @@ mod handlers;
 mod models;
 mod reply;
 mod router;
+mod utils;
 
 use poem::listener::TcpListener;
 use poem::middleware::Tracing;
@@ -16,14 +17,24 @@ use std::env;
 use std::io;
 use std::sync::Arc;
 
-pub async fn run(mut config: Config) -> io::Result<()> {
-    if let Some(level) = config.poem_level.take() {
+pub async fn run(config: Config) -> io::Result<()> {
+    let Config {
+        port,
+        poem_level,
+        workspace,
+        max_upload,
+    } = config;
+
+    if let Some(level) = poem_level {
         env::set_var("RUST_LOG", format!("poem={level}"));
     }
     tracing_subscriber::fmt().init();
 
-    let server = Server::new(TcpListener::bind(("127.0.0.1", config.port))).name("sachima");
-    let app = router::new().with(Tracing).data(Arc::new(config));
+    let server = Server::new(TcpListener::bind(("127.0.0.1", port))).name("sachima");
+    let app = router::new()
+        .with(Tracing)
+        .data(Arc::new(workspace))
+        .data(max_upload);
 
     server.run(app).await
 }

@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -8,6 +11,7 @@ use poem::web::Path;
 use poem::web::Query;
 use poem::Body;
 use poem::Request;
+use serde::Deserialize;
 use tokio::fs;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::BufReader;
@@ -15,20 +19,27 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio_stream::wrappers::ReadDirStream;
 use tokio_stream::{Stream, StreamExt};
 
+use crate::config::Workspace;
 use crate::models::fs::{Directory, FsEntry};
 use crate::reply::Data as ReplyData;
 use crate::reply::Error as ReplyError;
-use crate::Config;
+
+/// Limit operations to the workspace
+pub async fn ensure_relative(req: Request) -> poem::Result<Request> {
+    let path: PathBuf = req.path_params()?;
+
+    if path.is_absolute() {
+        return Err(ReplyError::IsAbsolute.into());
+    }
+
+    Ok(req)
+}
 
 /// Protect the workspace root
 pub async fn ensure_not_root(req: Request) -> poem::Result<Request> {
-    let config: &Arc<Config> = req.extensions().get().unwrap();
-    let path: PathBuf = req.path_params()?;
+    let path: String = req.path_params()?;
 
-    println!("ensure_not_root");
-
-    let path = config.workspace.join(path);
-    if path == *config.workspace {
+    if path.is_empty() {
         return Err(ReplyError::WorkspaceRoot.into());
     }
 
@@ -47,16 +58,16 @@ pub async fn ensure_not_root(req: Request) -> poem::Result<Request> {
 ///   - I/O error => 503
 #[handler]
 pub async fn download(
-    Data(config): Data<&Arc<Config>>,
+    Data(workspace): Data<&Arc<Workspace>>,
     Path(path): Path<PathBuf>,
 ) -> Result<Body, ReplyError> {
-    let path = config.workspace.join(path);
+    let path = workspace.join(path);
 
-    if path == *config.workspace {
+    if path == workspace.path() {
         return Err(ReplyError::WorkspaceRoot);
     }
 
-    if !path.exists() {
+    if !fs::try_exists(&path).await? {
         return Err(ReplyError::NotFound);
     }
 
@@ -77,17 +88,17 @@ pub async fn download(
 ///   - I/O Error => ReplyError::Io
 #[handler]
 pub async fn upload(
-    Data(config): Data<&Arc<Config>>,
+    Data(workspace): Data<&Arc<Workspace>>,
     Path(path): Path<PathBuf>,
     mut bytes: Bytes,
 ) -> Result<ReplyData<()>, ReplyError> {
-    let path = config.workspace.join(path);
+    let path = workspace.join(path);
 
-    if !path.parent().unwrap().exists() {
+    if !fs::try_exists(path.parent().unwrap()).await? {
         return Err(ReplyError::MissingParent);
     }
 
-    if path.exists() {
+    if fs::try_exists(&path).await? {
         return Err(ReplyError::AlreadyExists);
     }
 
@@ -104,24 +115,33 @@ pub async fn upload(
     Ok(ReplyData(()))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RenameParam {
+    name: String,
+}
+
 /// **Rename a file or directory**
 /// - Ok
 /// - Err:
 ///   - file doesn't exist => ReplyError::NotFound
+///   - new name has been used => ReplyError::AlreadyExists
 ///   - I/O error => ReplyError::Io
 #[handler]
 pub async fn rename(
-    Data(config): Data<&Arc<Config>>,
+    Data(workspace): Data<&Arc<Workspace>>,
     Path(path): Path<PathBuf>,
-    Query(name): Query<String>,
+    Query(RenameParam { name }): Query<RenameParam>,
 ) -> Result<ReplyData<()>, ReplyError> {
-    let src = config.workspace.join(path);
+    let src = workspace.join(path);
 
-    if !src.exists() {
+    if !fs::try_exists(&src).await? {
         return Err(ReplyError::NotFound);
     }
 
     let dest = src.with_file_name(name);
+    if fs::try_exists(&dest).await? {
+        return Err(ReplyError::AlreadyExists);
+    }
     fs::rename(src, dest).await?;
 
     Ok(ReplyData(()))
@@ -134,12 +154,12 @@ pub async fn rename(
 ///   - I/O error => ReplyError::Io
 #[handler]
 pub async fn remove(
-    Data(config): Data<&Arc<Config>>,
+    Data(workspace): Data<&Arc<Workspace>>,
     Path(path): Path<PathBuf>,
 ) -> Result<ReplyData<()>, ReplyError> {
-    let path = config.workspace.join(path);
+    let path = workspace.join(path);
 
-    if !path.exists() {
+    if !fs::try_exists(&path).await? {
         return Err(ReplyError::NotFound);
     }
 
@@ -159,13 +179,13 @@ pub async fn remove(
 ///   - path isn't directory => ReplyError::NotADirectory
 ///   - I/O error => ReplyError::Io
 #[handler]
-pub async fn read(
-    Data(config): Data<&Arc<Config>>,
+pub async fn read_dir(
+    Data(workspace): Data<&Arc<Workspace>>,
     Path(org): Path<PathBuf>,
 ) -> Result<ReplyData<Directory>, ReplyError> {
-    let path = config.workspace.join(&org);
+    let path = workspace.join(&org);
 
-    if !path.exists() {
+    if !fs::try_exists(&path).await? {
         return Err(ReplyError::NotFound);
     }
 
@@ -188,7 +208,7 @@ pub async fn read(
     }
     entries.sort();
 
-    let parent = (path != *config.workspace).then(|| org.to_string_lossy().into_owned());
+    let parent = (path != workspace.path()).then(|| org.to_string_lossy().into_owned());
 
     Ok(ReplyData(Directory { parent, entries }))
 }
@@ -200,17 +220,17 @@ pub async fn read(
 ///   - directory has already existed => ReplyError::AlreadyExists
 ///   - I/O error => ReplyError::Io
 #[handler]
-pub async fn make(
-    Data(config): Data<&Arc<Config>>,
+pub async fn mkdir(
+    Data(workspace): Data<&Arc<Workspace>>,
     Path(path): Path<PathBuf>,
 ) -> Result<ReplyData<()>, ReplyError> {
-    let path = config.workspace.join(path);
+    let path = workspace.join(path);
 
-    if !path.parent().unwrap().exists() {
+    if !fs::try_exists(path.parent().unwrap()).await? {
         return Err(ReplyError::MissingParent);
     }
 
-    if path.exists() {
+    if fs::try_exists(&path).await? {
         return Err(ReplyError::AlreadyExists);
     }
 
