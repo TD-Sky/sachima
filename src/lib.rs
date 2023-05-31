@@ -6,7 +6,7 @@ mod handlers;
 mod models;
 mod reply;
 mod router;
-mod utils;
+pub mod utils;
 
 use poem::listener::TcpListener;
 use poem::middleware::Tracing;

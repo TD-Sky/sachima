@@ -1,5 +1,11 @@
+use bytesize::ByteSize;
 use serde::Serialize;
 use std::cmp::Ordering;
+use std::io;
+use time::OffsetDateTime;
+use tokio::fs::DirEntry;
+
+use crate::utils::time::local_date_time;
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct Directory {
@@ -9,8 +15,10 @@ pub struct Directory {
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct FsEntry {
-    name: String,
     kind: FsEntryKind,
+    name: String,
+    size: Option<ByteSize>,
+    modified: OffsetDateTime,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -20,20 +28,24 @@ pub enum FsEntryKind {
 }
 
 impl FsEntry {
-    #[inline]
-    pub fn dir(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
+    pub async fn dir(entry: &DirEntry) -> io::Result<Self> {
+        Ok(Self {
             kind: FsEntryKind::Dir,
-        }
+            name: entry.file_name().to_string_lossy().into_owned(),
+            size: None,
+            modified: local_date_time(entry.metadata().await?.modified()?),
+        })
     }
 
-    #[inline]
-    pub fn file(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
+    pub async fn file(entry: &DirEntry) -> io::Result<Self> {
+        let md = entry.metadata().await?;
+
+        Ok(Self {
             kind: FsEntryKind::File,
-        }
+            name: entry.file_name().to_string_lossy().into_owned(),
+            size: Some(ByteSize(md.len())),
+            modified: local_date_time(md.modified()?),
+        })
     }
 }
 
@@ -64,16 +76,5 @@ impl PartialOrd for FsEntryKind {
             (Self::File, Self::Dir) => Some(Ordering::Greater),
             _ => unreachable!(),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::FsEntry;
-
-    #[test]
-    fn test_entry_ord() {
-        assert!(FsEntry::file("/a/b/c") > FsEntry::dir("/e/f/g"));
-        assert_eq!(FsEntry::file("/a/b/c"), FsEntry::file("/a/b/c"));
     }
 }

@@ -1,3 +1,16 @@
+pub mod time {
+    use once_cell::sync::Lazy;
+    use std::time::SystemTime;
+    use time::{OffsetDateTime, UtcOffset};
+
+    pub static LOCAL_OFFSET: Lazy<UtcOffset> =
+        Lazy::new(|| UtcOffset::current_local_offset().unwrap());
+
+    pub fn local_date_time(systime: SystemTime) -> OffsetDateTime {
+        OffsetDateTime::from(systime).to_offset(*LOCAL_OFFSET)
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use crate::config::Workspace;

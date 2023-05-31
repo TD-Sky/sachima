@@ -198,11 +198,10 @@ pub async fn read_dir(
 
     while let Some(entry) = rd.next().await {
         let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
         let entry = if entry.file_type().await?.is_dir() {
-            FsEntry::dir(name)
+            FsEntry::dir(&entry).await?
         } else {
-            FsEntry::file(name)
+            FsEntry::file(&entry).await?
         };
         entries.push(entry);
     }
