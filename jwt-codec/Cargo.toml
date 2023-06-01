@@ -1,0 +1,10 @@
+[package]
+name = "jwt-codec"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hmac = "0.12"
+jwt = "0.16"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
