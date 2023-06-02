@@ -14,7 +14,7 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 
 use crate::reply::status::*;
 use crate::router::{http_error, reply_error};
-use crate::utils::tests::*;
+use crate::utils::{self, tests::*};
 
 async fn create_txt(path: PathBuf, content: &str) -> io::Result<()> {
     let mut fd = OpenOptions::new()
@@ -51,33 +51,33 @@ async fn test_download() -> io::Result<()> {
     let (tmp_dir, wk) = setup_workspace();
     let root = tmp_dir.path();
     let app = Route::new()
-        .at("/rfs/*path", super::download)
+        .at("/file/*path", super::download)
         .catch_error(http_error)
         .data(Arc::new(wk));
     let client = TestClient::new(app);
 
     client
-        .get("/rfs/")
+        .get("/file/")
         .send()
         .await
         .assert_status(StatusCode::FORBIDDEN);
 
     client
-        .get("/rfs/not-found")
+        .get("/file/not-found")
         .send()
         .await
         .assert_status(StatusCode::NOT_FOUND);
 
     fs::create_dir(root.join("is-a-directory")).await?;
     client
-        .get("/rfs/is-a-directory")
+        .get("/file/is-a-directory")
         .send()
         .await
         .assert_status(StatusCode::UNSUPPORTED_MEDIA_TYPE);
 
     create_txt(root.join("download-file.txt"), "the downloaded content").await?;
     client
-        .get("/rfs/download-file.txt")
+        .get("/file/download-file.txt")
         .send()
         .await
         .assert_status_is_ok();
@@ -87,13 +87,13 @@ async fn test_download() -> io::Result<()> {
 
 #[tokio::test]
 async fn test_upload_file() -> io::Result<()> {
-    let (tmp_dir, client) = setup("/wfs/*path", post(super::upload));
+    let (tmp_dir, client) = setup("/file/*path", post(super::upload));
     let content = "the uploaded content";
 
     assert_buss_status(
         MISSING_PARENT,
         client
-            .post("/wfs/missing-parent/upload.txt")
+            .post("/file/missing-parent/upload.txt")
             .body(content)
             .send()
             .await
@@ -105,7 +105,7 @@ async fn test_upload_file() -> io::Result<()> {
     assert_buss_status(
         ALREADY_EXISTS,
         client
-            .post("/wfs/already-exists")
+            .post("/file/already-exists")
             .body(content)
             .send()
             .await
@@ -116,7 +116,7 @@ async fn test_upload_file() -> io::Result<()> {
     assert_buss_status(
         OK,
         client
-            .post("/wfs/upload.txt")
+            .post("/file/upload.txt")
             .body(content)
             .send()
             .await
@@ -129,13 +129,13 @@ async fn test_upload_file() -> io::Result<()> {
 
 #[tokio::test]
 async fn test_rename() -> io::Result<()> {
-    let (tmp_dir, client) = setup("/wfs/*path", put(super::rename));
+    let (tmp_dir, client) = setup("/file/*path", put(super::rename));
     let root = tmp_dir.path();
 
     assert_buss_status(
         NOT_FOUND,
         client
-            .put("/wfs/not-found")
+            .put("/file/not-found")
             .query("name", &"rename-not-found")
             .send()
             .await
@@ -148,7 +148,7 @@ async fn test_rename() -> io::Result<()> {
     assert_buss_status(
         ALREADY_EXISTS,
         client
-            .put("/wfs/rename-to-already-exists")
+            .put("/file/rename-to-already-exists")
             .query("name", &"already-exists")
             .send()
             .await
@@ -160,7 +160,7 @@ async fn test_rename() -> io::Result<()> {
     assert_buss_status(
         OK,
         client
-            .put("/wfs/rename-old-dir")
+            .put("/file/rename-old-dir")
             .query("name", &"rename-new-dir")
             .send()
             .await
@@ -172,7 +172,7 @@ async fn test_rename() -> io::Result<()> {
     assert_buss_status(
         OK,
         client
-            .put("/wfs/rename-old-file")
+            .put("/file/rename-old-file")
             .query("name", &"rename-new-file")
             .send()
             .await
@@ -185,74 +185,37 @@ async fn test_rename() -> io::Result<()> {
 
 #[tokio::test]
 async fn test_remove_entity() -> io::Result<()> {
-    let (tmp_dir, client) = setup("/wfs/*path", delete(super::remove));
+    let (tmp_dir, client) = setup("/file/*path", delete(super::remove));
     let root = tmp_dir.path();
 
     assert_buss_status(
         NOT_FOUND,
-        client.delete("/wfs/not-found").send().await.json().await,
+        client.delete("/file/not-found").send().await.json().await,
     );
 
     fs::create_dir(root.join("remove-dir")).await?;
     assert_buss_status(
         OK,
-        client.delete("/wfs/remove-dir").send().await.json().await,
+        client.delete("/file/remove-dir").send().await.json().await,
     );
 
     create_txt(root.join("remove-file"), "").await?;
     assert_buss_status(
         OK,
-        client.delete("/wfs/remove-file").send().await.json().await,
+        client.delete("/file/remove-file").send().await.json().await,
     );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_read_dir() -> io::Result<()> {
-    let (tmp_dir, client) = setup("/rdir/*path", get(super::read_dir));
-
-    assert_buss_status(
-        NOT_FOUND,
-        client.get("/rdir/not-found").send().await.json().await,
-    );
-
-    create_txt(tmp_dir.path().join("not-a-directory"), "").await?;
-    assert_buss_status(
-        NOT_A_DIRECTORY,
-        client
-            .get("/rdir/not-a-directory")
-            .send()
-            .await
-            .json()
-            .await,
-    );
-
-    let read_dir = tmp_dir.path().join("read-dir");
-    fs::create_dir(&read_dir).await?;
-    for i in 0..5 {
-        create_txt(
-            read_dir.join(format!("{i}.txt")),
-            &format!("the content of text {i}"),
-        )
-        .await?;
-    }
-    for i in 5..10 {
-        fs::create_dir(read_dir.join(i.to_string())).await?;
-    }
-    assert_buss_status(OK, client.get("/rdir/read-dir").send().await.json().await);
 
     Ok(())
 }
 
 #[tokio::test]
 async fn test_mkdir() -> io::Result<()> {
-    let (tmp_dir, client) = setup("/wdir/*path", post(super::mkdir));
+    let (tmp_dir, client) = setup("/dir/*path", post(super::mkdir));
 
     assert_buss_status(
         MISSING_PARENT,
         client
-            .post("/wdir/missing-parent/make-dir")
+            .post("/dir/missing-parent/make-dir")
             .send()
             .await
             .json()
@@ -262,15 +225,10 @@ async fn test_mkdir() -> io::Result<()> {
     fs::create_dir(tmp_dir.path().join("already-exists")).await?;
     assert_buss_status(
         ALREADY_EXISTS,
-        client
-            .post("/wdir/already-exists")
-            .send()
-            .await
-            .json()
-            .await,
+        client.post("/dir/already-exists").send().await.json().await,
     );
 
-    assert_buss_status(OK, client.post("/wdir/make-dir").send().await.json().await);
+    assert_buss_status(OK, client.post("/dir/make-dir").send().await.json().await);
 
     Ok(())
 }

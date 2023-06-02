@@ -4,9 +4,6 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use clap::Parser;
-use once_cell::sync::Lazy;
-
-use sachima::utils::time::LOCAL_OFFSET;
 use sachima::Config;
 
 #[derive(Parser)]
@@ -26,7 +23,7 @@ fn main() -> io::Result<()> {
     // in multithreaded context.
     //
     // refer to <https://github.com/time-rs/time/discussions/421>
-    Lazy::force(&LOCAL_OFFSET);
+    sachima::utils::time::init();
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()

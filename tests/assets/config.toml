@@ -1,4 +1,7 @@
 port = 8000
-poem_level = "info"
+database-url = 'postgres://postgres:@localhost:5432/sachima'
+poem-log-level = "info"
 workspace = "/tmp/sachima"
-max_upload = "2G"
+max-upload = "2G"
+jwt-secret-key = "sachima jwt secret key"
+password-salt = "sachima password salt"

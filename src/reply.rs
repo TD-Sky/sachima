@@ -9,12 +9,12 @@ use serde::Serialize;
 use status::*;
 
 #[derive(Debug)]
-pub struct Data<T>(pub T);
+pub struct ReplyData<T>(pub T);
 
 // This Error would be converted into Response directly,
 // so it doesn't need to display anything
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum ReplyError {
     #[error("try to operate the workspace root")]
     WorkspaceRoot,
 
@@ -36,19 +36,25 @@ pub enum Error {
     #[error("path is a directory")]
     IsADirectory,
 
+    #[error("no such user in registry")]
+    UserNotFound,
+
+    #[error("input password is incorrect")]
+    IncorrectPassword,
+
     #[error(transparent)]
     Io(#[from] io::Error),
 }
 
 #[derive(Debug, Serialize)]
-struct ReplyData<T> {
+struct ReplyDataObject<T> {
     status: u16,
     data: T,
 }
 
-impl<T: Serialize + Send> IntoResponse for Data<T> {
+impl<T: Serialize + Send> IntoResponse for ReplyData<T> {
     fn into_response(self) -> Response {
-        Json(ReplyData {
+        Json(ReplyDataObject {
             status: OK,
             data: self.0,
         })
@@ -57,72 +63,79 @@ impl<T: Serialize + Send> IntoResponse for Data<T> {
 }
 
 #[derive(Debug, Serialize)]
-struct ReplyError {
+struct ReplyErrorObject {
     status: u16,
     msg: &'static str,
 }
 
-impl TryFrom<Error> for ReplyError {
+impl TryFrom<ReplyError> for ReplyErrorObject {
     type Error = io::Error;
 
-    fn try_from(e: Error) -> Result<Self, Self::Error> {
+    fn try_from(e: ReplyError) -> Result<Self, Self::Error> {
         Ok(match e {
-            Error::WorkspaceRoot => Self {
+            ReplyError::WorkspaceRoot => Self {
                 status: WORKSPACE_ROOT,
                 msg: "try to operate the workspace root",
             },
-            Error::IsAbsolute => Self {
+            ReplyError::IsAbsolute => Self {
                 status: IS_ABSOLUTE,
                 msg: "path is absolute",
             },
-            Error::AlreadyExists => Self {
+            ReplyError::AlreadyExists => Self {
                 status: ALREADY_EXISTS,
                 msg: "file has already existed",
             },
-            Error::MissingParent => Self {
+            ReplyError::MissingParent => Self {
                 status: MISSING_PARENT,
                 msg: "missing parent directory",
             },
-            Error::NotFound => Self {
+            ReplyError::NotFound => Self {
                 status: NOT_FOUND,
                 msg: "no such file or directory",
             },
-            Error::NotADirectory => Self {
+            ReplyError::NotADirectory => Self {
                 status: NOT_A_DIRECTORY,
                 msg: "path isn't a directory",
             },
-            Error::IsADirectory => Self {
+            ReplyError::IsADirectory => Self {
                 status: IS_A_DIRECTORY,
                 msg: "path is a directory",
             },
+            ReplyError::UserNotFound => Self {
+                status: USER_NOT_FOUND,
+                msg: "no such user in registry",
+            },
+            ReplyError::IncorrectPassword => Self {
+                status: INCORRECT_PASSWORD,
+                msg: "input password is incorrect",
+            },
 
-            Error::Io(e) => return Err(e),
+            ReplyError::Io(e) => return Err(e),
         })
     }
 }
 
-impl IntoResponse for Error {
-    #[inline]
+impl IntoResponse for ReplyError {
     fn into_response(self) -> Response {
-        match ReplyError::try_from(self) {
+        match ReplyErrorObject::try_from(self) {
             Ok(rp) => rp.into_response(),
             Err(e) => InternalServerError(e).into_response(),
         }
     }
 }
 
-impl IntoResponse for ReplyError {
+impl IntoResponse for ReplyErrorObject {
     #[inline]
     fn into_response(self) -> Response {
         Json(self).into_response()
     }
 }
 
-impl ResponseError for Error {
+impl ResponseError for ReplyError {
     #[inline]
     fn status(&self) -> StatusCode {
         match self {
-            Error::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ReplyError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::OK,
         }
     }
@@ -144,5 +157,7 @@ pub mod status {
         NOT_FOUND = 5,
         NOT_A_DIRECTORY = 6,
         IS_A_DIRECTORY = 7,
+        USER_NOT_FOUND = 8,
+        INCORRECT_PASSWORD = 9,
     }
 }

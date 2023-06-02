@@ -8,50 +8,26 @@ use bytesize::ByteSize;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
 pub struct Config {
-    /// 服务器部署端口
+    /// The deploying port
     pub port: u16,
-    /// poem的日志等级
-    pub poem_level: Option<LogLevel>,
-    /// 服务的目录
+
+    /// The database url
+    pub database_url: String,
+
+    /// Log level of poem
+    pub poem_log_level: Option<LogLevel>,
+
+    /// The serving directory
     pub workspace: Workspace,
-    /// 可上传单文件的最大数据量
+
+    /// The max data size of single file
     pub max_upload: ByteSize,
-}
 
-#[cfg(test)]
-mod tests {
-    use super::Config;
-    use super::LogLevel;
-    use super::Workspace;
-    use bytesize::ByteSize;
-    use indoc::indoc;
-    use std::env;
-    use std::fs;
-    use std::path::PathBuf;
+    /// The hash secret key for JWT
+    pub jwt_secret_key: String,
 
-    #[test]
-    fn test_valid() {
-        fs::create_dir_all(
-            PathBuf::from(env::var_os("HOME").unwrap()).join(".local/state/sachima"),
-        )
-        .unwrap();
-
-        let expected = Config {
-            port: 8000,
-            poem_level: Some(LogLevel::Info),
-            workspace: Workspace::try_from("~/.local/state/sachima".to_owned()).unwrap(),
-            max_upload: ByteSize::gb(2),
-        };
-
-        let input = indoc! {r#"
-            port = 8000
-            poem_level = "info"
-            workspace = "~/.local/state/sachima"
-            max_upload = "2G"
-        "#};
-
-        let actual: Config = toml::from_str(input).unwrap();
-        assert_eq!(actual, expected);
-    }
+    /// The hash salt of user password
+    pub password_salt: String,
 }

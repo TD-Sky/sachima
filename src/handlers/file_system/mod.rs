@@ -21,8 +21,8 @@ use tokio_stream::{Stream, StreamExt};
 
 use crate::config::Workspace;
 use crate::models::fs::{Directory, FsEntry};
-use crate::reply::Data as ReplyData;
-use crate::reply::Error as ReplyError;
+use crate::reply::ReplyError;
+use crate::reply::ReplyData;
 
 /// Limit operations to the workspace
 pub async fn ensure_relative(req: Request) -> poem::Result<Request> {
