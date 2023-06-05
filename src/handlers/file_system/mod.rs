@@ -4,9 +4,9 @@ mod tests;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use poem::handler;
 use poem::web::Data;
+use poem::web::Multipart;
 use poem::web::Path;
 use poem::web::Query;
 use poem::Body;
@@ -21,8 +21,8 @@ use tokio_stream::{Stream, StreamExt};
 
 use crate::config::Workspace;
 use crate::models::fs::{Directory, FsEntry};
-use crate::reply::ReplyError;
 use crate::reply::ReplyData;
+use crate::reply::ReplyError;
 
 /// Limit operations to the workspace
 pub async fn ensure_relative(req: Request) -> poem::Result<Request> {
@@ -55,7 +55,6 @@ pub async fn ensure_not_root(req: Request) -> poem::Result<Request> {
 ///   - workspace root => 403
 ///   - file doesn't exist => 404
 ///   - it's a directory, not a file => 415
-///   - I/O error => 503
 #[handler]
 pub async fn download(
     Data(workspace): Data<&Arc<Workspace>>,
@@ -80,27 +79,34 @@ pub async fn download(
     Ok(Body::from_async_read(BufReader::new(fd)))
 }
 
-/// **Upload a file**
+/// **Upload a file to the parent directory**
 /// - Ok
 /// - Err:
 ///   - parent directory doesn't exist => ReplyError::MissingParent
 ///   - file has already existed => ReplyError::AlreadyExists
-///   - I/O Error => ReplyError::Io
+///   - multipart has no file => ReplyError::FileExpected
+///   - file field has no file name => ReplyError::MissingFileName
 #[handler]
 pub async fn upload(
     Data(workspace): Data<&Arc<Workspace>>,
-    Path(path): Path<PathBuf>,
-    mut bytes: Bytes,
+    Path(parent): Path<PathBuf>,
+    mut mltp: Multipart,
 ) -> Result<ReplyData<()>, ReplyError> {
-    let path = workspace.join(path);
+    let parent = workspace.join(parent);
 
-    if !fs::try_exists(path.parent().unwrap()).await? {
+    if !fs::try_exists(&parent).await? {
         return Err(ReplyError::MissingParent);
     }
 
+    let Some(file) = mltp.next_field().await? else {
+        return Err(ReplyError::FileExpected);
+    };
+
+    let path = parent.join(file.file_name().ok_or(ReplyError::MissingFileName)?);
     if fs::try_exists(&path).await? {
         return Err(ReplyError::AlreadyExists);
     }
+    let bytes = file.bytes().await?;
 
     let mut fd = OpenOptions::new()
         .write(true)
@@ -109,7 +115,7 @@ pub async fn upload(
         .await?;
 
     let mut fd = BufWriter::new(&mut fd);
-    fd.write_all_buf(&mut bytes).await?;
+    fd.write_all(&bytes).await?;
     fd.flush().await?;
 
     Ok(ReplyData(()))
@@ -125,7 +131,6 @@ pub struct RenameParam {
 /// - Err:
 ///   - file doesn't exist => ReplyError::NotFound
 ///   - new name has been used => ReplyError::AlreadyExists
-///   - I/O error => ReplyError::Io
 #[handler]
 pub async fn rename(
     Data(workspace): Data<&Arc<Workspace>>,
@@ -151,7 +156,6 @@ pub async fn rename(
 /// - Ok
 /// - Err:
 ///   - file doesn't exist => ReplyError::NotFound
-///   - I/O error => ReplyError::Io
 #[handler]
 pub async fn remove(
     Data(workspace): Data<&Arc<Workspace>>,
@@ -177,7 +181,6 @@ pub async fn remove(
 /// - Err:
 ///   - directory doesn't exist => ReplyError::NotFound
 ///   - path isn't directory => ReplyError::NotADirectory
-///   - I/O error => ReplyError::Io
 #[handler]
 pub async fn read_dir(
     Data(workspace): Data<&Arc<Workspace>>,
@@ -217,7 +220,6 @@ pub async fn read_dir(
 /// - Err:
 ///   - parent directory doesn't exist => ReplyError::MissingParent
 ///   - directory has already existed => ReplyError::AlreadyExists
-///   - I/O error => ReplyError::Io
 #[handler]
 pub async fn mkdir(
     Data(workspace): Data<&Arc<Workspace>>,

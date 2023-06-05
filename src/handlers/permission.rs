@@ -24,7 +24,7 @@ use crate::utils::pswd;
 #[handler]
 pub async fn register(Json(mut user): Json<UserModel>) -> Result<ReplyData<()>, ReplyError> {
     user.password = pswd::hash(&user.password);
-    user.into_active_model().insert(db::hdr()).await.unwrap();
+    user.into_active_model().insert(db::hdr()).await?;
     Ok(ReplyData(()))
 }
 
@@ -33,10 +33,10 @@ pub async fn login(
     Json(login_form): Json<UserModel>,
     Data(codec): Data<&Arc<Codec<Hs256>>>,
 ) -> Result<ReplyData<Token>, ReplyError> {
-    let Ok(Some(user)) = Registry::find()
+    let Some(user) = Registry::find()
         .filter(registry::Column::Username.eq(&login_form.username))
         .one(db::hdr())
-        .await
+        .await?
     else {
         return Err(ReplyError::UserNotFound);
     };

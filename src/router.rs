@@ -4,7 +4,7 @@ use jwt_codec::prelude::Hs256;
 use jwt_codec::Codec;
 use poem::http::StatusCode;
 use poem::Route;
-use poem::{get, post};
+use poem::{delete, get, post, put};
 use poem::{Endpoint, EndpointExt};
 use poem::{IntoResponse, Response};
 
@@ -19,7 +19,7 @@ pub async fn http_error(e: ReplyError) -> StatusCode {
         ReplyError::WorkspaceRoot | ReplyError::IsAbsolute => StatusCode::FORBIDDEN,
         ReplyError::NotFound => StatusCode::NOT_FOUND,
         ReplyError::IsADirectory => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        ReplyError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        ReplyError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         _ => unreachable!(),
     }
 }
@@ -33,18 +33,13 @@ pub fn new(config: Config) -> Route {
 
     Route::new()
         .nest("/wk", workspace(config.workspace, codec.clone()))
-        .at("/user/register", post(permission::register))
-        .at("/user/login", post(permission::login).data(codec.clone()))
-        .at(
-            "/user/info",
-            get(permission::info).with(JwtVerifier::new(codec)),
-        )
+        .nest("/user", user(codec))
 }
 
 fn workspace(wk: Workspace, codec: Arc<Codec<Hs256>>) -> impl Endpoint {
     Route::new()
-        .nest("/read", read_wk())
-        .nest("/write", write_wk().with(JwtVerifier::new(codec)))
+        .nest("/r", read_wk())
+        .nest("/w", write_wk().with(JwtVerifier::new(codec)))
         .data(Arc::new(wk))
 }
 
@@ -70,19 +65,36 @@ fn read_wk() -> impl Endpoint {
 fn write_wk() -> impl Endpoint {
     Route::new()
         .at(
-            "/file/*path",
+            "/upload/*parent",
             post(file_system::upload)
-           .put(file_system::rename)
-           .delete(file_system::remove)
+                .before(file_system::ensure_relative),
+        )
+        .at(
+            "/rename/*path",
+            put(file_system::rename)
                 .before(file_system::ensure_relative)
                 .before(file_system::ensure_not_root),
         )
         .at(
-            "/dir/*path",
+            "/remove/*path",
+            delete(file_system::remove)
+                .before(file_system::ensure_relative)
+                .before(file_system::ensure_not_root),
+        )
+        .at(
+            "/mkdir/*path",
             post(file_system::mkdir)
                 .before(file_system::ensure_relative)
                 .before(file_system::ensure_not_root),
         )
+        .catch_error(reply_error)
+}
+
+fn user(codec: Arc<Codec<Hs256>>) -> impl Endpoint {
+    Route::new()
+        .at("/register", post(permission::register))
+        .at("/login", post(permission::login).data(codec.clone()))
+        .at("/info", get(permission::info).with(JwtVerifier::new(codec)))
         .catch_error(reply_error)
 }
 
@@ -117,12 +129,12 @@ mod tests {
 
         assert_buss_status(
             WORKSPACE_ROOT,
-            client.delete("/file/").send().await.json().await,
+            client.delete("/remove/").send().await.json().await,
         );
 
         assert_buss_status(
             IS_ABSOLUTE,
-            client.delete("/file//").send().await.json().await,
+            client.delete("/remove//").send().await.json().await,
         );
     }
 }

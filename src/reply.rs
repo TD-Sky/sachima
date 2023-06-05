@@ -1,12 +1,15 @@
 use std::io;
 
-use poem::error::{InternalServerError, ResponseError};
+use poem::error::{ParseMultipartError, ResponseError};
 use poem::http::StatusCode;
 use poem::web::Json;
 use poem::{IntoResponse, Response};
+use sea_orm::DbErr;
 use serde::Serialize;
 
 use status::*;
+
+pub type InternalError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug)]
 pub struct ReplyData<T>(pub T);
@@ -14,6 +17,7 @@ pub struct ReplyData<T>(pub T);
 // This Error would be converted into Response directly,
 // so it doesn't need to display anything
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ReplyError {
     #[error("try to operate the workspace root")]
     WorkspaceRoot,
@@ -42,8 +46,14 @@ pub enum ReplyError {
     #[error("input password is incorrect")]
     IncorrectPassword,
 
+    #[error("A file is expected in request")]
+    FileExpected,
+
+    #[error("missing file name in Content-Disposition")]
+    MissingFileName,
+
     #[error(transparent)]
-    Io(#[from] io::Error),
+    Internal(InternalError),
 }
 
 #[derive(Debug, Serialize)]
@@ -69,7 +79,7 @@ struct ReplyErrorObject {
 }
 
 impl TryFrom<ReplyError> for ReplyErrorObject {
-    type Error = io::Error;
+    type Error = InternalError;
 
     fn try_from(e: ReplyError) -> Result<Self, Self::Error> {
         Ok(match e {
@@ -109,8 +119,18 @@ impl TryFrom<ReplyError> for ReplyErrorObject {
                 status: INCORRECT_PASSWORD,
                 msg: "input password is incorrect",
             },
+            ReplyError::FileExpected => Self {
+                status: FILE_EXPECTED,
+                msg: "A file is expected in request",
+            },
+            ReplyError::MissingFileName => Self {
+                status: MISSING_FILE_NAME,
+                msg: "missing file name in Content-Disposition",
+            },
 
-            ReplyError::Io(e) => return Err(e),
+            ReplyError::Internal(e) => return Err(e),
+
+            _ => unreachable!("unimplemented error variant"),
         })
     }
 }
@@ -119,7 +139,9 @@ impl IntoResponse for ReplyError {
     fn into_response(self) -> Response {
         match ReplyErrorObject::try_from(self) {
             Ok(rp) => rp.into_response(),
-            Err(e) => InternalServerError(e).into_response(),
+            Err(e) => format!("{e:?}")
+                .with_status(StatusCode::INTERNAL_SERVER_ERROR)
+                .into_response(),
         }
     }
 }
@@ -135,7 +157,7 @@ impl ResponseError for ReplyError {
     #[inline]
     fn status(&self) -> StatusCode {
         match self {
-            ReplyError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ReplyError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::OK,
         }
     }
@@ -159,5 +181,28 @@ pub mod status {
         IS_A_DIRECTORY = 7,
         USER_NOT_FOUND = 8,
         INCORRECT_PASSWORD = 9,
+        FILE_EXPECTED = 10,
+        MISSING_FILE_NAME = 11,
+    }
+}
+
+impl From<io::Error> for ReplyError {
+    #[inline]
+    fn from(e: io::Error) -> Self {
+        Self::Internal(Box::new(e))
+    }
+}
+
+impl From<ParseMultipartError> for ReplyError {
+    #[inline]
+    fn from(e: ParseMultipartError) -> Self {
+        Self::Internal(Box::new(e))
+    }
+}
+
+impl From<DbErr> for ReplyError {
+    #[inline]
+    fn from(e: DbErr) -> Self {
+        Self::Internal(Box::new(e))
     }
 }
