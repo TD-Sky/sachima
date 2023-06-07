@@ -5,11 +5,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use poem::handler;
+use poem::http::header::CONTENT_DISPOSITION;
 use poem::web::Data;
 use poem::web::Multipart;
 use poem::web::Path;
 use poem::web::Query;
 use poem::Body;
+use poem::IntoResponse;
 use poem::Request;
 use serde::Deserialize;
 use tokio::fs;
@@ -59,7 +61,7 @@ pub async fn ensure_not_root(req: Request) -> poem::Result<Request> {
 pub async fn download(
     Data(workspace): Data<&Arc<Workspace>>,
     Path(path): Path<PathBuf>,
-) -> Result<Body, ReplyError> {
+) -> Result<impl IntoResponse, ReplyError> {
     let path = workspace.join(path);
 
     if path == workspace.path() {
@@ -74,9 +76,13 @@ pub async fn download(
         return Err(ReplyError::IsADirectory);
     }
 
-    let fd = File::open(path).await?;
+    let fd = File::open(&path).await?;
+    let filename = path.file_name().and_then(|s| s.to_str()).unwrap();
 
-    Ok(Body::from_async_read(BufReader::new(fd)))
+    Ok(Body::from_async_read(BufReader::new(fd)).with_header(
+        CONTENT_DISPOSITION,
+        format!(r#"attachment; filename="{filename}""#),
+    ))
 }
 
 /// **Upload a file to the parent directory**
