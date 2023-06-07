@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use sachima::Config;
+use time::UtcOffset;
 
 #[derive(Parser)]
 struct Cli {
@@ -23,11 +24,11 @@ fn main() -> io::Result<()> {
     // in multithreaded context.
     //
     // refer to <https://github.com/time-rs/time/discussions/421>
-    sachima::utils::time::init();
+    let local_offset = UtcOffset::current_local_offset().unwrap();
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap()
-        .block_on(sachima::run(config))
+        .block_on(sachima::run(config, local_offset))
 }

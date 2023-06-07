@@ -2,10 +2,9 @@ use bytesize::ByteSize;
 use serde::Serialize;
 use std::cmp::Ordering;
 use std::io;
-use time::OffsetDateTime;
 use tokio::fs::DirEntry;
 
-use crate::utils::time::local_date_time;
+use crate::utils::time::to_unix_timestamp;
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct Directory {
@@ -18,7 +17,7 @@ pub struct FsEntry {
     kind: FsEntryKind,
     name: String,
     size: Option<ByteSize>,
-    modified: OffsetDateTime,
+    modified: String,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -33,7 +32,7 @@ impl FsEntry {
             kind: FsEntryKind::Dir,
             name: entry.file_name().to_string_lossy().into_owned(),
             size: None,
-            modified: local_date_time(entry.metadata().await?.modified()?),
+            modified: to_unix_timestamp(entry.metadata().await?.modified()?).to_string(),
         })
     }
 
@@ -44,7 +43,7 @@ impl FsEntry {
             kind: FsEntryKind::File,
             name: entry.file_name().to_string_lossy().into_owned(),
             size: Some(ByteSize(md.len())),
-            modified: local_date_time(md.modified()?),
+            modified: to_unix_timestamp(md.modified()?).to_string(),
         })
     }
 }
