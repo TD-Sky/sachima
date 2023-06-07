@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use poem::http::StatusCode;
 use poem::test::{TestClient, TestForm, TestFormField};
-use poem::Route;
 use poem::{delete, post, put};
+use poem::{get, Route};
 use poem::{Endpoint, EndpointExt};
 use tempdir::TempDir;
 use tokio::fs;
@@ -229,6 +229,38 @@ async fn test_remove_entity() -> io::Result<()> {
 
     create_txt(root.join("remove-file"), "").await?;
     assert_buss_status(OK, client.delete("/remove-file").send().await.json().await);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_read_dir() -> io::Result<()> {
+    let (tmp_dir, client) = setup("/*path", get(super::read_dir));
+
+    assert_buss_status(
+        NOT_FOUND,
+        client.get("/not-found").send().await.json().await,
+    );
+
+    create_txt(tmp_dir.path().join("not-a-directory"), "").await?;
+    assert_buss_status(
+        NOT_A_DIRECTORY,
+        client.get("/not-a-directory").send().await.json().await,
+    );
+
+    let read_dir = tmp_dir.path().join("read-dir");
+    fs::create_dir(&read_dir).await?;
+    for i in 0..5 {
+        create_txt(
+            read_dir.join(format!("{i}.txt")),
+            &format!("the content of text {i}"),
+        )
+        .await?;
+    }
+    for i in 5..10 {
+        fs::create_dir(read_dir.join(i.to_string())).await?;
+    }
+    assert_buss_status(OK, client.get("/read-dir").send().await.json().await);
 
     Ok(())
 }
