@@ -4,8 +4,9 @@ mod tests;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use bytesize::ByteSize;
 use poem::handler;
-use poem::http::header::CONTENT_DISPOSITION;
+use poem::http::header::{CONTENT_DISPOSITION, CONTENT_LENGTH};
 use poem::web::Data;
 use poem::web::Multipart;
 use poem::web::Path;
@@ -83,6 +84,19 @@ pub async fn download(
         CONTENT_DISPOSITION,
         format!(r#"attachment; filename="{filename}""#),
     ))
+}
+
+pub fn limit_size(req: Request, max_upload: ByteSize) -> poem::Result<Request> {
+    if ByteSize(
+        req.header(CONTENT_LENGTH)
+            .and_then(|s| s.parse().ok())
+            .expect("content-length error"),
+    ) > max_upload
+    {
+        return Err(ReplyError::ResourceTooLarge(max_upload).into());
+    }
+
+    Ok(req)
 }
 
 /// **Upload a file to the parent directory**

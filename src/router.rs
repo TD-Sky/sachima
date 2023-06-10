@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use bytesize::ByteSize;
 use jwt_codec::prelude::Hs256;
 use jwt_codec::Codec;
 use poem::http::StatusCode;
@@ -32,14 +33,17 @@ pub fn new(config: Config) -> Route {
     let codec = Arc::new(Codec::hs256(config.jwt_secret_key.as_bytes()));
 
     Route::new()
-        .nest("/wk", workspace(config.workspace, codec.clone()))
+        .nest(
+            "/wk",
+            workspace(config.workspace, config.max_upload, codec.clone()),
+        )
         .nest("/user", user(codec))
 }
 
-fn workspace(wk: Workspace, codec: Arc<Codec<Hs256>>) -> impl Endpoint {
+fn workspace(wk: Workspace, max_upload: ByteSize, codec: Arc<Codec<Hs256>>) -> impl Endpoint {
     Route::new()
         .nest("/r", read_wk())
-        .nest("/w", write_wk().with(JwtVerifier::new(codec)))
+        .nest("/w", write_wk(max_upload).with(JwtVerifier::new(codec)))
         .data(Arc::new(wk))
 }
 
@@ -62,11 +66,12 @@ fn read_wk() -> impl Endpoint {
 /// Write the file system,
 /// these handlers cannot operate the workspace root.
 #[rustfmt::skip]
-fn write_wk() -> impl Endpoint {
+fn write_wk(max_upload: ByteSize) -> impl Endpoint {
     Route::new()
         .at(
             "/upload/*parent",
             post(file_system::upload)
+                .before(move |req| async move {file_system::limit_size(req, max_upload)})
                 .before(file_system::ensure_relative),
         )
         .at(
@@ -103,6 +108,7 @@ mod tests {
     use super::{read_wk, write_wk};
     use crate::reply::status::{IS_ABSOLUTE, WORKSPACE_ROOT};
     use crate::utils::tests::*;
+    use bytesize::ByteSize;
     use poem::http::StatusCode;
     use poem::test::TestClient;
     use poem::EndpointExt;
@@ -125,7 +131,7 @@ mod tests {
     #[tokio::test]
     async fn test_write_workspace() {
         let (_tmp_dir, wk) = setup_workspace();
-        let client = TestClient::new(write_wk().data(Arc::new(wk)));
+        let client = TestClient::new(write_wk(ByteSize::gb(2)).data(Arc::new(wk)));
 
         assert_buss_status(
             WORKSPACE_ROOT,

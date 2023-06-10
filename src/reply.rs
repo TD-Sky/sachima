@@ -1,5 +1,7 @@
+use std::borrow::Cow;
 use std::io;
 
+use bytesize::ByteSize;
 use poem::error::{ParseMultipartError, ResponseError};
 use poem::http::StatusCode;
 use poem::web::Json;
@@ -46,11 +48,14 @@ pub enum ReplyError {
     #[error("input password is incorrect")]
     IncorrectPassword,
 
-    #[error("A file is expected in request")]
+    #[error("a file is expected in request")]
     FileExpected,
 
     #[error("missing file name in Content-Disposition")]
     MissingFileName,
+
+    #[error("uploaded resource is larger than the upper limit {0}")]
+    ResourceTooLarge(ByteSize),
 
     #[error(transparent)]
     Internal(InternalError),
@@ -75,7 +80,7 @@ impl<T: Serialize + Send> IntoResponse for ReplyData<T> {
 #[derive(Debug, Serialize)]
 struct ReplyErrorObject {
     status: u16,
-    msg: &'static str,
+    msg: Cow<'static, str>,
 }
 
 impl TryFrom<ReplyError> for ReplyErrorObject {
@@ -85,52 +90,54 @@ impl TryFrom<ReplyError> for ReplyErrorObject {
         Ok(match e {
             ReplyError::WorkspaceRoot => Self {
                 status: WORKSPACE_ROOT,
-                msg: "try to operate the workspace root",
+                msg: "try to operate the workspace root".into(),
             },
             ReplyError::IsAbsolute => Self {
                 status: IS_ABSOLUTE,
-                msg: "path is absolute",
+                msg: "path is absolute".into(),
             },
             ReplyError::AlreadyExists => Self {
                 status: ALREADY_EXISTS,
-                msg: "file has already existed",
+                msg: "file has already existed".into(),
             },
             ReplyError::MissingParent => Self {
                 status: MISSING_PARENT,
-                msg: "missing parent directory",
+                msg: "missing parent directory".into(),
             },
             ReplyError::NotFound => Self {
                 status: NOT_FOUND,
-                msg: "no such file or directory",
+                msg: "no such file or directory".into(),
             },
             ReplyError::NotADirectory => Self {
                 status: NOT_A_DIRECTORY,
-                msg: "path isn't a directory",
+                msg: "path isn't a directory".into(),
             },
             ReplyError::IsADirectory => Self {
                 status: IS_A_DIRECTORY,
-                msg: "path is a directory",
+                msg: "path is a directory".into(),
             },
             ReplyError::UserNotFound => Self {
                 status: USER_NOT_FOUND,
-                msg: "no such user in registry",
+                msg: "no such user in registry".into(),
             },
             ReplyError::IncorrectPassword => Self {
                 status: INCORRECT_PASSWORD,
-                msg: "input password is incorrect",
+                msg: "input password is incorrect".into(),
             },
             ReplyError::FileExpected => Self {
                 status: FILE_EXPECTED,
-                msg: "A file is expected in request",
+                msg: "A file is expected in request".into(),
             },
             ReplyError::MissingFileName => Self {
                 status: MISSING_FILE_NAME,
-                msg: "missing file name in Content-Disposition",
+                msg: "missing file name in Content-Disposition".into(),
+            },
+            e @ ReplyError::ResourceTooLarge(_) => Self {
+                status: RESOURCE_TOO_LARGE,
+                msg: e.to_string().into(),
             },
 
             ReplyError::Internal(e) => return Err(e),
-
-            _ => unreachable!("unimplemented error variant"),
         })
     }
 }
@@ -183,6 +190,7 @@ pub mod status {
         INCORRECT_PASSWORD = 9,
         FILE_EXPECTED = 10,
         MISSING_FILE_NAME = 11,
+        RESOURCE_TOO_LARGE = 12,
     }
 }
 
